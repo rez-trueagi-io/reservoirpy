@@ -1,10 +1,103 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
+
+# Poetry build config
+[tool.poetry]
+name = "reservoirpy"
+version = "0.3.9.post1"
+description = "\"A simple and flexible code for Reservoir Computing architectures like Echo State Networks.\""
+authors = [
+    "Xavier Hinaut <xavier.hinaut@inria.fr>",
+    "Nathan Trouvain <nathan.trouvain@inria.fr>"    
+]
+maintainers = [
+    "Paul Bernard <paul.bernard@inria.fr>",
+    "Nathan Trouvain <nathan.trouvain@inria.fr>",
+    "Xavier Hinaut <xavier.hinaut@inria.fr>",
+]
+license = "MIT"
+readme = "README.md"
+homepage = "https://python-poetry.org/"
+repository = "https://github.com/reservoirpy/reservoirpy"
+documentation = "https://reservoirpy.readthedocs.io/en/latest/index.html"
+keywords = ["machine learning", "reservoir computing"]
+classifiers=[
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+
+[tool.poetry.urls]
+    "Bug Tracker" = "https://github.com/reservoirpy/reservoirpy/issues"
+    "Documentation" = "https://reservoirpy.readthedocs.io/en/latest/index.html"
+    "Source Code" = "https://github.com/reservoirpy/reservoirpy"
+
+
+[tool.poetry.dependencies]
+python = "^3.8"
+numpy = "^1.24"
+scipy = "^1.9"
+joblib = "^1.3"
+tqdm = "~4"
+dill = "^0.3"
+
+
+# Extras (optional dependencies)
+hyperopt = { version = "^0.2.7", optional = true }
+matplotlib = { version = "^3.7.2", optional = true }
+
+
+[tool.poetry.extras]
+hyper = ["matplotlib", "hyperopt"]
+
+
+# Optional dependency groups
+# Dev
+[tool.poetry.group.dev]
+optional = true
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+mypy = "^1.4.1"
+ruff = "^0.0.282"
+
+# Docs
+[tool.poetry.group.docs]
+optional = true
+
+
+[tool.poetry.group.docs.dependencies]
+nbsphinx = "^0.9.2"
+sphinx-copybutton = "^0.5.2"
+pydata-sphinx-theme = "^0.13.3"
+ipython = "^8.12"
+sphinx-panels = "^0.6.0"
+
+# Pytest config
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests"
+]
+
+# Black config
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py38', 'py39', 'py310']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -12,3 +105,100 @@ exclude = '''
   |\.git
 )/
 '''
+
+
+# Ruff config (https://beta.ruff.rs/docs/configuration/#using-pyprojecttoml)
+[tool.ruff]
+# Enable the pycodestyle (`E`) and Pyflakes (`F`) rules by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = [
+    # pycodestyle
+    "E", 
+    # pyflakes
+    "F", 
+    # pycodestyle warnings
+    "W", 
+    # isort
+    "I",
+    # pydocstyle 
+    "D"]
+
+target-version = "py38"
+
+ignore=[
+    # space before : (needed for how black formats slicing)
+    "E203",
+    # do not assign a lambda expression, use a def
+    "E731",
+    # do not use variables named 'l', 'O', or 'I'
+    "E741",
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".git",
+    "__pycache__",
+    "dist",
+    "sklearn/externals",
+    "docs/_build",
+    "build",
+    "tutorials",
+    "examples",
+]
+per-file-ignores = {}
+
+# Same as Black.
+line-length = 88
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+
+[tool.ruff.pydocstyle]
+convention = "numpy"
+
+
+# Mypy config
+[tool.mypy]
+ignore_missing_imports = true
+allow_redefinition = true
+
+
+# Coverage.py config
+[tool.coverage.run]
+branch = true
+source =  ["reservoirpy"]
+include = ["*/reservoirpy/*"]
+omit = [
+    "*/setup.py",
+    "*/tests/*",
+    "*/examples/*",
+    "*/experimental/*",
+    "*/compat/*",
+    "*/hyper/*",
+    "*/type.py",
+]
+
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "if self.verbose:",
+    "if verbose:",
+]
+show_missing = true
+
+[tool.coverage.html]
+directory = "htmlcov"
