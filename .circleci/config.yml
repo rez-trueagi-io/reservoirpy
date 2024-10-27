@@ -1,199 +1,227 @@
+# This code is licensed from CircleCI to the user under the MIT license.
+# See here for details: https://circleci.com/developer/orbs/licensing
 version: 2.1
+description: |
+    Utilize Setup Workflows and the Continuation orb to easily construct dynamic and multi-config pipelines.
+display:
+    home_url: https://circleci.com/docs/2.0/dynamic-config/
+    source_url: https://github.com/CircleCI-Public/continuation-orb/
+commands:
+    continue:
+        description: |
+            Makes a post request to https://circleci.com/api/v2/pipeline/continue to continue a setup workflow.
+        parameters:
+            circleci_domain:
+                default: circleci.com
+                description: The domain of the CircleCI installation - defaults to circleci.com. (Only necessary for CircleCI Server users)
+                type: string
+            configuration_path:
+                description: The path to the configuration that will be passed to the continue API
+                type: string
+            parameters:
+                default: '{}'
+                description: The parameters used for the pipeline. This can either be a JSON object containing parameters or a path to a file containing a JSON object with parameters
+                type: string
+            when:
+                default: on_success
+                description: Specify when to enable or disable this command
+                enum:
+                    - on_success
+                    - on_fail
+                    - always
+                type: enum
+        steps:
+            - run:
+                command: |
+                    #!/bin/sh
 
-orbs:
-  orb-tools: circleci/orb-tools@12.1.1
+                    set -e
 
+                    if [ -z "${CIRCLE_CONTINUATION_KEY}" ]; then
+                        echo "CIRCLE_CONTINUATION_KEY is required. Make sure setup workflows are enabled."
+                        exit 1
+                    fi
+
+                    if [ -z "${CONFIG_PATH}" ]; then
+                        echo "CONFIG_PATH is required."
+                        exit 1
+                    fi
+
+                    if ! which curl > /dev/null; then
+                        echo "curl is required to use this command"
+                        exit 1
+                    fi
+
+                    if ! which jq > /dev/null; then
+                        echo "jq is required to use this command"
+                        exit 1
+                    fi
+
+                    PARAMS=$([ -f "$PARAMETERS" ] && cat "$PARAMETERS" || echo "$PARAMETERS")
+                    COMMAND=$(echo "$PARAMS" | jq . >/dev/null 2>&1)
+
+                    if ! $COMMAND; then
+                        echo "PARAMETERS aren't valid json"
+                        exit 1
+                    fi
+
+                    mkdir -p /tmp/circleci
+                    rm -rf /tmp/circleci/continue_post.json
+
+                    # Escape the config as a JSON string.
+                    jq -Rs '.' "$CONFIG_PATH" > /tmp/circleci/config-string.json
+
+                    jq -n \
+                        --arg continuation "$CIRCLE_CONTINUATION_KEY" \
+                        --arg params "$PARAMS" \
+                        --slurpfile config /tmp/circleci/config-string.json \
+                        '{"continuation-key": $continuation, "configuration": $config|join("\n"), "parameters": $params|fromjson}' > /tmp/circleci/continue_post.json
+
+                    cat /tmp/circleci/continue_post.json
+
+                    [ "$(curl \
+                            -o /dev/stderr \
+                            -w '%{http_code}' \
+                            -XPOST \
+                            -H "Content-Type: application/json" \
+                            -H "Accept: application/json"  \
+                            --data @/tmp/circleci/continue_post.json \
+                            "https://${CIRCLECI_DOMAIN}/api/v2/pipeline/continue")" \
+                       -eq 200 ]
+                environment:
+                    CIRCLECI_DOMAIN: <<parameters.circleci_domain>>
+                    CONFIG_PATH: <<parameters.configuration_path>>
+                    PARAMETERS: <<parameters.parameters>>
+                name: Continue Pipeline
+                when: <<parameters.when>>
+    finish:
+        description: |
+            Makes a post request to https://circleci.com/api/v2/pipeline/continue with an empty config to advance the pipeline, but not execute any further workflows, preventing other continuations.
+        parameters:
+            circleci_domain:
+                default: circleci.com
+                description: The domain of the CircleCI installation - defaults to circleci.com. (Only necessary for CircleCI Server users)
+                type: string
+        steps:
+            - run:
+                command: |
+                    if ! which curl > /dev/null; then
+                        echo "curl is required to use this command"
+                        exit 1
+                    fi
+
+                    if ! which jq > /dev/null; then
+                        echo "jq is required to use this command"
+                        exit 1
+                    fi
+
+                    JSON_BODY=$( jq -n \
+                      --arg continuation "$CIRCLE_CONTINUATION_KEY" \
+                      '{"continuation-key": $continuation, "configuration": "{version: 2, jobs: {}, workflows: {version: 2}}", parameters: {}}'
+                    )
+                    echo "$JSON_BODY"
+
+                    [[ $(curl \
+                            -o /dev/stderr \
+                            -w '%{http_code}' \
+                            -XPOST \
+                            -H "Content-Type: application/json" \
+                            -H "Accept: application/json"  \
+                            --data "${JSON_BODY}" \
+                            "https://${CIRCLECI_DOMAIN}/api/v2/pipeline/continue") \
+                       -eq 200 ]]
+                environment:
+                    CIRCLECI_DOMAIN: <<parameters.circleci_domain>>
+                name: Finish Pipeline
 executors:
-  default:
-    docker:
-      - image: cimg/base:current
-    resource_class: large
-
+    default:
+        description: |
+            The executor for continuations
+        docker:
+            - image: cimg/base:<<parameters.tag>>
+        parameters:
+            tag:
+                default: stable
+                description: |
+                    Pick a specific circleci/base image variant: https://hub.docker.com/r/cimg/base/tags
+                type: string
 jobs:
-  say-hello:
-    executor: default
-    steps:
-      - checkout
-      - run:
-          name: "Say hello"
-          command: "echo Hello, World!"
-
-  run-node-commands:
-    executor: default
-    description: |
-      Simple drop-in job to run commands for your Node.js application automatically.
-    parameters:
-      app-dir:
-        type: string
-        default: "~/project"
-        description: >-
-          Path to the directory containing your package.json file. Not needed if
-          package.json lives in the root.
-      artifacts-path:
-        type: string
-        default: ""
-        description: >
-          Path to a file or directory to upload to artifacts after running the
-          script.
-      cache-only-lockfile:
-        type: boolean
-        default: true
-        description: >
-          If true, package.json will be ignored in the cache key. Useful for
-          projects where package.json changes do not always invalidate dependencies.
-
-          Note: package.json will still be the final fallback key in case a project
-          is not configured with a lock file.
-      cache-path:
-        type: string
-        default: ""
-        description: >
-          By default, this job will utilize 'npm ci' and cache the '~/.npm'
-          directory. Override which path to cache with this parameter.
-
-          The cache will be ignored when using npm ci, as the command doesn't
-          benefit from cache.
-      cache-version:
-        type: string
-        default: "v1"
-        description: >-
-          Change the default cache version if you need to clear the cache for any
-          reason.
-      check-cache:
-        type: enum
-        enum:
-          - never
-          - always
-          - detect
-        default: never
+    continue:
         description: |
-          Yarn berry only for Zero install support -
-          Use 'always' to always --check-cache argument to yarn install.
-          Use 'detect' to enable caching of yarn.lock and to only add when required.
-      include-branch-in-cache-key:
-        type: boolean
-        default: true
+            Make a request to the API to continue the pipeline.
+        executor: default
+        parameters:
+            checkout:
+                default: true
+                description: Whether to run an optional checkout step before continuing
+                type: boolean
+            circleci_domain:
+                default: circleci.com
+                description: The domain of the CircleCI installation - defaults to circleci.com. (Only necessary for CircleCI Server users)
+                type: string
+            configuration_path:
+                description: The path to the configuration that will be passed to the continue API
+                type: string
+            parameters:
+                default: '{}'
+                description: The parameters used for the pipeline. This can either be a JSON object containing parameters or a path to a file containing a JSON object with parameters
+                type: string
+            resource_class:
+                default: small
+                description: Resource class to use
+                type: string
+            workspace_path:
+                default: ""
+                description: Path to attach the workspace to
+                type: string
+        resource_class: << parameters.resource_class >>
+        steps:
+            - when:
+                condition:
+                    equal:
+                        - true
+                        - << parameters.checkout >>
+                steps:
+                    - checkout
+            - when:
+                condition:
+                    not:
+                        equal:
+                            - ""
+                            - << parameters.workspace_path >>
+                steps:
+                    - attach_workspace:
+                        at: << parameters.workspace_path >>
+            - continue:
+                circleci_domain: << parameters.circleci_domain >>
+                configuration_path: << parameters.configuration_path >>
+                parameters: << parameters.parameters >>
+examples:
+    continue_pipeline:
         description: |
-          If true, this cache bucket will only apply to jobs within the same branch.
-      npm-run:
-        type: string
-        default: ""
-        description: >-
-          The name of the script within your package.json which you would like to
-          run.
-      override-ci-command:
-        type: string
-        default: ""
-        description: >
-          By default, packages will be installed with "npm ci" or "yarn install
-          --frozen-lockfile".
-
-          Optionally supply a custom package installation command, with any
-          additional flags needed.
-      pkg-manager:
-        type: enum
-        enum:
-          - npm
-          - yarn
-          - yarn-berry
-          - pnpm
-        default: npm
-        description: "Select the default node package manager to use."
-      pnpm-run:
-        type: string
-        default: ""
-        description: >-
-          The name of the script within your package.json which you would like to
-          run.
-      resource_class:
-        type: enum
-        enum:
-          - small
-          - medium
-          - medium+
-          - large
-          - xlarge
-          - 2xlarge
-          - 2xlarge+
-        default: large
-        description: "Configure the executor resource class"
-      setup:
-        type: steps
-        default: []
-        description: >-
-          Provide any optional steps you would like to run prior to installing the
-          node dependencies. This is a good place to install global modules.
-      version:
-        type: string
-        default: "lts"
-        description: >
-          Pick a specific cimg/node image version tag:
-          https://hub.docker.com/r/cimg/node
-      with-cache:
-        type: boolean
-        default: true
+            Utilize the "continue" job to specify which configuration file to run next.
+        usage:
+            version: "2.1"
+            setup: true
+            orbs:
+                continuation: circleci/continuation@0.5.0
+            workflows:
+                use-my-orb:
+                    jobs:
+                        - continuation/continue:
+                            configuration_path: .circleci/continue_config.yml
+    continue_pipeline_with_parameters:
         description: |
-          Cache your node packages automatically for faster install times.
-          Cache will be ignored when using npm ci.
-      yarn-run:
-        type: string
-        default: ""
-        description: >-
-          The name of the script within your package.json which you would like to
-          run.
-    steps:
-      - checkout
-      - << parameters.setup >>
-      - run:
-          name: Install Packages
-          command: |
-            # Example: npm install
-            echo "Installing packages..."
-      - run:
-          name: Run << parameters.pkg-manager >> << parameters.npm-run >>
-          command: |
-            #!/usr/bin/env bash
+            Utilize the "continue" job to specify which configuration file to run next and add additional parameters.
+        usage:
+            version: "2.1"
+            setup: true
+            orbs:
+                continuation: circleci/continuation@0.5.0
+            workflows:
+                use-my-orb:
+                    jobs:
+                        - continuation/continue:
+                            configuration_path: .circleci/continue_config.yml
+                            parameters: '{"image-tag":"current"}'
 
-            if [[ "<< parameters.pkg-manager >>" == "npm" ]]; then
-                npm run "<< parameters.npm-run >>"
-            elif [[ "<< parameters.pkg-manager >>" == "pnpm" ]]; then
-                pnpm run "<< parameters.pnpm-run >>"
-            else
-                yarn run "<< parameters.yarn-run >>"
-            fi
-          environment:
-            ORB_PARAM_NPM_RUN: "<< parameters.npm-run >>"
-            ORB_PARAM_PKG_MANAGER: "<< parameters.pkg-manager >>"
-            ORB_PARAM_PNPM_RUN: "<< parameters.pnpm-run >>"
-            ORB_PARAM_YARN_RUN: "<< parameters.yarn-run >>"
-          working_directory: "<< parameters.app-dir >>"
-      - when:
-          condition: "<< parameters.artifacts-path >>"
-          steps:
-            - store_artifacts:
-                path: "<< parameters.artifacts-path >>"
-
-workflows:
-  orb-workflow:
-    jobs:
-      - orb-tools/lint:
-          checkout: true
-    
-      - orb-tools/pack
-
-#      - example-job:
-#          docker:
-            # replace with your preferred image
-#            - image: cimg/base:stable
-#          steps:
-#            - node/install
-
-  hi-workflow:
-    jobs:
-      - say-hello
-      - run-node-commands:
-          app-dir: "~/project"
-          # Override other parameters as needed
-          # Example:
-          # pkg-manager: yarn
-          # npm-run: build
