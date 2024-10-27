@@ -29,3 +29,165 @@ workflows:
     # Inside the workflow, you define the jobs you want to run.
     jobs:
       - say-hello
+
+description: |
+  Simple drop-in job to run commands for your Node.js application automatically.
+executor:
+  name: default
+  resource_class: << parameters.resource_class >>
+  tag: << parameters.version >>
+parameters:
+  app-dir:
+    default: ~/project
+    description: >-
+      Path to the directory containing your package.json file. Not needed if
+      package.json lives in the root.
+    type: string
+  artifacts-path:
+    default: ''
+    description: >
+      Path to a file or directory to upload to artifacts after running the
+      script.
+    type: string
+  cache-only-lockfile:
+    default: true
+    description: >
+      If true, package.json will be ignored in the cache key. Useful for
+      projects where package.json changes do not always invalidate dependencies.
+
+      Note: package.json will still be the final fallback key incase a project
+      is not configured with a lock file.
+    type: boolean
+  cache-path:
+    default: ''
+    description: >
+      By default, this orb will utilize 'npm ci' and cache the '~/.npm'
+      directory. Override which path to cache with this parameter.
+
+      The cache will be ignored when using npm ci, as the command doesn't
+      benefit from cache.
+    type: string
+  cache-version:
+    default: v1
+    description: >-
+      Change the default cache version if you need to clear the cache for any
+      reason.
+    type: string
+  check-cache:
+    default: never
+    description: |
+      Yarn berry only for Zero install support -
+      Use 'always' to always --check-cache argument to yarn install.
+      Use 'detect' to enable caching of yarn.lock and to only add when required.
+    enum:
+      - never
+      - always
+      - detect
+    type: enum
+  include-branch-in-cache-key:
+    default: true
+    description: |
+      If true, this cache bucket will only apply to jobs within the same branch.
+    type: boolean
+  npm-run:
+    default: ''
+    description: >-
+      The name of the script within your package.json which you would like to
+      run.
+    type: string
+  override-ci-command:
+    default: ''
+    description: >
+      By default, packages will be installed with "npm ci" or "yarn install
+      --frozen-lockfile".
+
+      Optionally supply a custom package installation command, with any
+      additional flags needed.
+    type: string
+  pkg-manager:
+    default: npm
+    description: Select the default node package manager to use.
+    enum:
+      - npm
+      - yarn
+      - yarn-berry
+      - pnpm
+    type: enum
+  pnpm-run:
+    default: ''
+    description: >-
+      The name of the script within your package.json which you would like to
+      run.
+    type: string
+  resource_class:
+    default: large
+    description: Configure the executor resource class
+    enum:
+      - small
+      - medium
+      - medium+
+      - large
+      - xlarge
+      - 2xlarge
+      - 2xlarge+
+    type: enum
+  setup:
+    default: []
+    description: >-
+      Provide any optional steps you would like to run prior to installing the
+      node dependencies. This is a good place to install global modules.
+    type: steps
+  version:
+    default: lts
+    description: >
+      Pick a specific cimg/node image version tag:
+      https://hub.docker.com/r/cimg/node
+    type: string
+  with-cache:
+    default: true
+    description: |
+      Cache your node packages automatically for faster install times.
+      Cache will be ignored when using npm ci.
+    type: boolean
+  yarn-run:
+    default: ''
+    description: >-
+      The name of the script within your package.json which you would like to
+      run.
+    type: string
+steps:
+  - checkout
+  - steps: << parameters.setup >>
+  - install-packages:
+      app-dir: <<parameters.app-dir>>
+      cache-only-lockfile: <<parameters.cache-only-lockfile>>
+      cache-path: <<parameters.cache-path>>
+      cache-version: <<parameters.cache-version>>
+      check-cache: <<parameters.check-cache>>
+      include-branch-in-cache-key: <<parameters.include-branch-in-cache-key>>
+      override-ci-command: <<parameters.override-ci-command>>
+      pkg-manager: <<parameters.pkg-manager>>
+      with-cache: <<parameters.with-cache>>
+  - run:
+      command: |
+        #!/usr/bin/env bash
+
+        if [[ "$ORB_PARAM_PKG_MANAGER" == "npm" ]]; then
+            npm run "$ORB_PARAM_NPM_RUN"
+        elif [[ "$ORB_PARAM_PKG_MANAGER" == "pnpm" ]]; then
+            pnpm run "$ORB_PARAM_PNPM_RUN"
+        else
+            yarn run "$ORB_PARAM_YARN_RUN"
+        fi
+      environment:
+        ORB_PARAM_NPM_RUN: <<parameters.npm-run>>
+        ORB_PARAM_PKG_MANAGER: <<parameters.pkg-manager>>
+        ORB_PARAM_PNPM_RUN: <<parameters.pnpm-run>>
+        ORB_PARAM_YARN_RUN: <<parameters.yarn-run>>
+      name: Run <<parameters.pkg-manager>> <<parameters.npm-run>>
+      working_directory: <<parameters.app-dir>>
+  - when:
+      condition: <<parameters.artifacts-path>>
+      steps:
+        - store_artifacts:
+            path: <<parameters.artifacts-path>>
